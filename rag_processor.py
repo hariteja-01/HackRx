@@ -1,14 +1,14 @@
-# rag_processor.py
+# rag_processor_optimized.py
 
 import os
 import requests
 import io
+import asyncio
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
-# --- New Imports for the Modern LCEL Approach ---
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
@@ -19,83 +19,89 @@ class RAGProcessor:
         self.api_key = api_key
         self.llm = None
         self.embeddings = None
+        # --- Caching Mechanism ---
+        # Stores processed vector stores in memory to avoid reprocessing the same document
+        self.vector_store_cache = {}
 
-    def _initialize_clients(self):
+    async def _initialize_clients(self):
+        # Using async initialization if ever needed, for now, it's synchronous
         if self.llm is None or self.embeddings is None:
             print("Initializing Google AI clients for the first time...")
             os.environ["GOOGLE_API_KEY"] = self.api_key
-            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
+            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0, request_timeout=120)
             self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
             print("Google AI clients initialized.")
 
-    def _get_pdf_text(self, pdf_url: str) -> str:
+    async def _get_vector_store_from_url(self, doc_url: str):
+        # --- Cache Check ---
+        if doc_url in self.vector_store_cache:
+            print(f"CACHE HIT: Loading vector store for {doc_url} from cache.")
+            return self.vector_store_cache[doc_url]
+
+        print(f"CACHE MISS: Processing new document from {doc_url}.")
+        
+        # 1. Download PDF
         try:
-            response = requests.get(pdf_url, timeout=30)
+            response = requests.get(doc_url, timeout=30)
             response.raise_for_status()
             pdf_file = io.BytesIO(response.content)
-            pdf_reader = PdfReader(pdf_file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() or ""
-            return text
         except requests.RequestException as e:
             print(f"Error downloading PDF: {e}")
-            return ""
-
-    def _get_text_chunks(self, text: str) -> list:
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=10000,
-            chunk_overlap=1000
-        )
-        return text_splitter.split_text(text)
-
-    def _get_vector_store(self, text_chunks: list):
-        if not text_chunks:
             return None
+
+        # 2. Extract Text
+        pdf_reader = PdfReader(pdf_file)
+        text = "".join(page.extract_text() or "" for page in pdf_reader.pages)
+        if not text:
+            return None
+
+        # 3. Chunk Text
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+        text_chunks = text_splitter.split_text(text)
+
+        # 4. Create and Cache Vector Store
         try:
-            self._initialize_clients()
-            vector_store = FAISS.from_texts(text_chunks, embedding=self.embeddings)
+            await self._initialize_clients()
+            vector_store = await asyncio.to_thread(FAISS.from_texts, text_chunks, self.embeddings)
+            self.vector_store_cache[doc_url] = vector_store
+            print(f"SUCCESS: Document processed and cached.")
             return vector_store
         except Exception as e:
             print(f"Error creating vector store: {e}")
             return None
 
-    def process_and_answer(self, doc_url: str, questions: list[str]) -> list[str]:
-        # --- This is the new, completely rewritten logic ---
-        self._initialize_clients()
-        print(f"Processing document: {doc_url}")
-
-        raw_text = self._get_pdf_text(doc_url)
-        if not raw_text:
+    async def process_and_answer(self, doc_url: str, questions: list[str]) -> list[str]:
+        await self._initialize_clients()
+        
+        vector_store = await self._get_vector_store_from_url(doc_url)
+        if not vector_store:
             return ["Could not process the document from the provided URL."] * len(questions)
 
-        text_chunks = self._get_text_chunks(raw_text)
-        vector_store = self._get_vector_store(text_chunks)
-        if not vector_store:
-            return ["Failed to create a searchable index from the document."] * len(questions)
+        # --- Advanced Retrieval (MMR) ---
+        # Fetches more documents initially (fetch_k=20) then selects the most relevant
+        # and diverse ones (k=8) to send to the LLM. This drastically improves context quality.
+        retriever = vector_store.as_retriever(
+            search_type="mmr",
+            search_kwargs={'k': 8, 'fetch_k': 20}
+        )
 
-        # Create a retriever to fetch relevant documents
-        retriever = vector_store.as_retriever()
-
-        # Define the prompt template
+        # --- Highly Constrained Prompt ---
         prompt_template = """
-        You are an expert at answering questions about policy documents.
-        Answer the question as precisely and detailed as possible from the provided context.
-        Ensure your answer is directly based on the text. If the answer is not in the
-        provided context, say "The answer is not available in the provided document."
-        Do not make up information.
+        You are a highly specialized Question-Answering bot. Your task is to answer the user's question with extreme precision,
+        based ONLY on the context provided below. Do not use any external knowledge. If the answer is not
+        explicitly stated in the context, you MUST reply with the exact phrase: "Information not available in the document."
+        Do not add any explanations or apologies.
 
-        Context:
+        CONTEXT:
         {context}
 
-        Question:
+        QUESTION:
         {question}
 
-        Precise Answer:
+        PRECISE ANSWER:
         """
         prompt = PromptTemplate.from_template(prompt_template)
         
-        # Create the new RAG chain using LCEL
         rag_chain = (
             {"context": retriever, "question": RunnablePassthrough()}
             | prompt
@@ -103,14 +109,16 @@ class RAGProcessor:
             | StrOutputParser()
         )
 
-        answers = []
-        for question in questions:
+        # --- Asynchronous Processing ---
+        # Run all question-answering tasks concurrently instead of in a loop
+        async def get_answer(question):
             try:
-                # Invoke the new chain for each question
-                answer = rag_chain.invoke(question)
-                answers.append(answer)
+                return await rag_chain.ainvoke(question)
             except Exception as e:
                 print(f"Error processing question '{question}': {e}")
-                answers.append("An error occurred while generating the answer.")
+                return "An error occurred during answer generation."
+
+        tasks = [get_answer(q) for q in questions]
+        answers = await asyncio.gather(*tasks)
         
         return answers
