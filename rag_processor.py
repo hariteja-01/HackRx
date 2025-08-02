@@ -5,7 +5,6 @@ import requests
 import io
 import asyncio
 from PyPDF2 import PdfReader
-# <<< FIX: Import missing types
 from typing import List, Dict, Any, Optional
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,11 +13,10 @@ from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-# <<< FIX: Use modern Pydantic import
 from pydantic import BaseModel, Field
 
-
-# --- Pydantic Models for internal processing ---
+# --- Pydantic Models ---
+# (These remain the same)
 class StructuredQuery(BaseModel):
     age: Optional[int] = Field(None, description="Age of the person")
     gender: Optional[str] = Field(None, description="Gender of the person")
@@ -36,26 +34,27 @@ class FinalResponse(BaseModel):
     amount: Optional[str] = Field(None, description="The approved or payable amount, if applicable. Can be a number or a description like 'As per plan limits'.")
     justification: List[Justification] = Field(..., description="A list of justification objects, each linking a document clause to the reasoning for the decision.")
 
+
 class RAGProcessor:
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("Google API Key is missing.")
         self.api_key = api_key
-        self.reasoning_llm = None
-        self.parsing_llm = None
+        self.llm = None # We will now use one LLM for all tasks
         self.embeddings = None
         self.vector_store_cache = {}
 
     async def _initialize_clients(self):
-        if self.reasoning_llm is None:
+        if self.llm is None:
             print("Initializing Google AI clients...")
             os.environ["GOOGLE_API_KEY"] = self.api_key
-            self.reasoning_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.0, request_timeout=300)
-            self.parsing_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.0, request_timeout=120)
+            # <<< FIX: Use the 'flash' model for all operations to avoid rate limits
+            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.0, request_timeout=300)
             self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
             print("Google AI clients initialized.")
 
     async def _get_vector_store(self, doc_url: str):
+        # This method remains the same
         if doc_url in self.vector_store_cache:
             print(f"CACHE HIT: Using cached vector store for {doc_url}.")
             return self.vector_store_cache[doc_url]
@@ -89,20 +88,23 @@ class RAGProcessor:
             input_variables=["query"],
             partial_variables={"format_instructions": parser_query.get_format_instructions()},
         )
-        chain_query = prompt_query | self.parsing_llm | parser_query
+        # Use the single, efficient LLM for all chains
+        chain_query = prompt_query | self.llm | parser_query
         structured_query = await chain_query.ainvoke({"query": query})
 
         # STEP 2: Intelligent Retrieval
         search_query_prompt = PromptTemplate.from_template(
             "Based on the following claim details, generate 5 specific and distinct search queries to find relevant clauses in an insurance policy document. Queries should be about waiting periods, specific procedure coverage, exclusions, and policy conditions.\n\nDetails:\n{details}"
         )
-        search_query_chain = search_query_prompt | self.parsing_llm | StrOutputParser()
+        search_query_chain = search_query_prompt | self.llm | StrOutputParser()
         search_queries_str = await search_query_chain.ainvoke({"details": str(structured_query)})
         search_queries = [q.strip() for q in search_queries_str.split('\n') if q.strip()]
         search_queries.append(query)
 
         retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={'k': 5, 'fetch_k': 25})
-        tasks = [retriever.aget_relevant_documents(q) for q in search_queries]
+        
+        # <<< FIX: Use .ainvoke instead of the deprecated .aget_relevant_documents
+        tasks = [retriever.ainvoke(q) for q in search_queries]
         retrieved_docs_lists = await asyncio.gather(*tasks)
         
         unique_docs = {doc.page_content: doc for sublist in retrieved_docs_lists for doc in sublist}
@@ -115,7 +117,7 @@ class RAGProcessor:
             input_variables=["details", "context"],
             partial_variables={"format_instructions": parser_decision.get_format_instructions()},
         )
-        chain_decision = prompt_decision | self.reasoning_llm | parser_decision
+        chain_decision = prompt_decision | self.llm | parser_decision
         final_decision = await chain_decision.ainvoke({"details": str(structured_query), "context": context})
 
         return final_decision
