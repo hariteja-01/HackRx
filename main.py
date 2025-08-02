@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-# --- Import the new, optimized processor ---
+# Make sure this matches your filename
 from rag_processor import RAGProcessor
 
 # Load environment variables from .env file
@@ -17,7 +17,6 @@ HACKATHON_BEARER_TOKEN = os.getenv("HACKATHON_API_KEY")
 
 # --- Initialize the RAG Processor ---
 try:
-    # This creates a single, long-lived instance of our processor
     rag_processor = RAGProcessor(api_key=GEMINI_API_KEY)
 except ValueError as e:
     print(f"FATAL ERROR: {e}. Please set GOOGLE_API_KEY in your .env file.")
@@ -47,14 +46,12 @@ class HackRxResponse(BaseModel):
     answers: list[str] = Field(..., description="A list of answers corresponding to the questions.")
 
 # --- API Endpoint ---
-# The endpoint is now an 'async def' function to handle concurrent operations
 @app.post("/hackrx/run", response_model=HackRxResponse, dependencies=[Depends(verify_token)])
 async def run_submission(request: HackRxRequest):
     if rag_processor is None:
         raise HTTPException(status_code=500, detail="Server not configured. Missing API keys.")
     
     try:
-        # We now 'await' the result from our new async processor
         answers = await rag_processor.process_and_answer(
             doc_url=request.documents,
             questions=request.questions
@@ -64,6 +61,7 @@ async def run_submission(request: HackRxRequest):
         print(f"An unexpected error occurred: {e}")
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
 
+# --- CORRECTED HEALTH CHECK ENDPOINT ---
 @app.get("/")
-def read_root():
+async def read_root():
     return {"status": "ok", "message": "HackRx 6.0 High-Performance API is running!"}
