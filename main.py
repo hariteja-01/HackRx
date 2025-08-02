@@ -5,7 +5,9 @@ from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-# Make sure this matches your filename
+from typing import List, Optional
+
+# Import the new, final version of the processor
 from rag_processor import RAGProcessor
 
 # Load environment variables from .env file
@@ -24,9 +26,9 @@ except ValueError as e:
 
 # --- API Definition ---
 app = FastAPI(
-    title="HackRx 6.0 High-Performance Submission",
-    description="Optimized LLM Query–Retrieval System with Caching and Async Processing.",
-    version="2.0.0"
+    title="HackRx 6.0 Decision Engine",
+    description="Advanced RAG system for claim adjudication using a 3-step reasoning pipeline.",
+    version="3.0.0"
 )
 
 # --- Security ---
@@ -37,31 +39,40 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
         raise HTTPException(status_code=401, detail="Invalid or missing authentication token")
     return credentials
 
-# --- Pydantic Models ---
-class HackRxRequest(BaseModel):
-    documents: str = Field(..., description="URL to the PDF document to be processed.")
-    questions: list[str] = Field(..., description="A list of questions to ask about the document.")
+# --- Pydantic Models for the New Structured Response ---
+class Justification(BaseModel):
+    clause: str = Field(..., description="The specific clause or text from the document.")
+    reasoning: str = Field(..., description="How this clause supports the decision.")
 
-class HackRxResponse(BaseModel):
-    answers: list[str] = Field(..., description="A list of answers corresponding to the questions.")
+class FinalResponse(BaseModel):
+    decision: str = Field(..., description="The final decision, e.g., 'Approved', 'Rejected', 'Partially Approved'.")
+    amount: Optional[str] = Field(None, description="The approved or payable amount, if applicable.")
+    justification: List[Justification] = Field(..., description="A list of clauses and reasons backing the decision.")
+
+class HackRxV3Request(BaseModel):
+    documents: str = Field(..., description="URL to the PDF document to be processed.")
+    questions: list[str] = Field(..., description="A list of natural language queries for adjudication.")
 
 # --- API Endpoint ---
-@app.post("/hackrx/run", response_model=HackRxResponse, dependencies=[Depends(verify_token)])
-async def run_submission(request: HackRxRequest):
+@app.post("/hackrx/run", response_model=List[FinalResponse], dependencies=[Depends(verify_token)])
+async def run_submission(request: HackRxV3Request):
     if rag_processor is None:
         raise HTTPException(status_code=500, detail="Server not configured. Missing API keys.")
     
     try:
-        answers = await rag_processor.process_and_answer(
+        # The processor now returns a list of structured FinalResponse objects
+        final_responses = await rag_processor.process_claim_queries(
             doc_url=request.documents,
-            questions=request.questions
+            queries=request.questions
         )
-        return HackRxResponse(answers=answers)
+        return final_responses
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        # This will catch errors and show them in the Render logs for easy debugging
+        print(f"An unexpected error occurred in the main endpoint: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
 
-# --- CORRECTED HEALTH CHECK ENDPOINT ---
 @app.get("/")
 async def read_root():
-    return {"status": "ok", "message": "HackRx 6.0 High-Performance API is running!"}
+    return {"status": "ok", "message": "HackRx 6.0 Decision Engine API is running!"}
