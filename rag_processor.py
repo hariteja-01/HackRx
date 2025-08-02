@@ -7,7 +7,10 @@ from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
+# ===================================================================
+# THIS IS THE FINAL, CORRECTED IMPORT.
 from langchain.chains.Youtubeing import load_qa_chain
+# ===================================================================
 from langchain.prompts import PromptTemplate
 
 class RAGProcessor:
@@ -35,10 +38,12 @@ class RAGProcessor:
             print("Google AI clients initialized.")
 
     def _get_pdf_text(self, pdf_url: str) -> str:
-        # ... (this method remains the same)
+        """
+        Downloads a PDF from a URL and extracts its text content.
+        """
         try:
             response = requests.get(pdf_url, timeout=30)
-            response.raise_for_status()
+            response.raise_for_status()  # Raise an exception for bad status codes
             pdf_file = io.BytesIO(response.content)
             pdf_reader = PdfReader(pdf_file)
             text = ""
@@ -50,7 +55,9 @@ class RAGProcessor:
             return ""
 
     def _get_text_chunks(self, text: str) -> list:
-        # ... (this method remains the same)
+        """
+        Splits text into smaller chunks for processing.
+        """
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=10000,
             chunk_overlap=1000
@@ -58,7 +65,9 @@ class RAGProcessor:
         return text_splitter.split_text(text)
 
     def _get_vector_store(self, text_chunks: list):
-        # ... (this method remains the same)
+        """
+        Creates a FAISS vector store from text chunks.
+        """
         if not text_chunks:
             return None
         try:
@@ -71,7 +80,9 @@ class RAGProcessor:
             return None
 
     def _get_conversational_chain(self):
-        # ... (this method remains the same)
+        """
+        Creates the question-answering chain with a custom prompt.
+        """
         # We need the LLM here, so ensure clients are initialized
         self._initialize_clients()
         prompt_template = """
