@@ -1,18 +1,22 @@
-# rag_processor_final.py
+# rag_processor.py
 
 import os
 import requests
 import io
 import asyncio
 from PyPDF2 import PdfReader
-from typing import List, Dict, Any
+# <<< FIX: Import missing types
+from typing import List, Dict, Any, Optional
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.runnables import RunnablePassthrough
+# <<< FIX: Use modern Pydantic import
+from pydantic import BaseModel, Field
+
 
 # --- Pydantic Models for internal processing ---
 class StructuredQuery(BaseModel):
@@ -37,7 +41,6 @@ class RAGProcessor:
         if not api_key:
             raise ValueError("Google API Key is missing.")
         self.api_key = api_key
-        # Use a more powerful model for reasoning, but keep Flash as a backup/parser
         self.reasoning_llm = None
         self.parsing_llm = None
         self.embeddings = None
@@ -79,7 +82,7 @@ class RAGProcessor:
     async def _adjudicate_query(self, query: str, vector_store) -> Dict[str, Any]:
         await self._initialize_clients()
 
-        # STEP 1: Deconstruction - Parse the query into a structured format
+        # STEP 1: Deconstruction
         parser_query = JsonOutputParser(pydantic_object=StructuredQuery)
         prompt_query = PromptTemplate(
             template="Parse the user's query to extract key details.\n{format_instructions}\nQuery: {query}\n",
@@ -89,21 +92,19 @@ class RAGProcessor:
         chain_query = prompt_query | self.parsing_llm | parser_query
         structured_query = await chain_query.ainvoke({"query": query})
 
-        # STEP 2: Intelligent Retrieval - Generate targeted search queries
+        # STEP 2: Intelligent Retrieval
         search_query_prompt = PromptTemplate.from_template(
             "Based on the following claim details, generate 5 specific and distinct search queries to find relevant clauses in an insurance policy document. Queries should be about waiting periods, specific procedure coverage, exclusions, and policy conditions.\n\nDetails:\n{details}"
         )
         search_query_chain = search_query_prompt | self.parsing_llm | StrOutputParser()
         search_queries_str = await search_query_chain.ainvoke({"details": str(structured_query)})
         search_queries = [q.strip() for q in search_queries_str.split('\n') if q.strip()]
-        search_queries.append(query) # Add original query for good measure
+        search_queries.append(query)
 
-        # Retrieve documents for all generated queries
         retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={'k': 5, 'fetch_k': 25})
         tasks = [retriever.aget_relevant_documents(q) for q in search_queries]
         retrieved_docs_lists = await asyncio.gather(*tasks)
         
-        # Flatten and de-duplicate context
         unique_docs = {doc.page_content: doc for sublist in retrieved_docs_lists for doc in sublist}
         context = "\n\n---\n\n".join([doc.page_content for doc in unique_docs.values()])
 
@@ -122,18 +123,15 @@ class RAGProcessor:
     async def process_claim_queries(self, doc_url: str, queries: list[str]) -> List[Dict[str, Any]]:
         vector_store = await self._get_vector_store(doc_url)
         if not vector_store:
-            # Create a default error response for each query if PDF processing fails
             error_response = FinalResponse(
                 decision="Error",
                 justification=[Justification(clause="System Error", reasoning="Could not process the policy document from the provided URL.")]
             ).dict()
             return [error_response] * len(queries)
             
-        # Process all queries concurrently
         tasks = [self._adjudicate_query(q, vector_store) for q in queries]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Handle any exceptions that may have occurred during processing
         final_results = []
         for res in results:
             if isinstance(res, Exception):

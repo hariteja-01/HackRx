@@ -3,11 +3,13 @@
 import os
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+# <<< FIX: Import missing types
 from typing import List, Optional
+# <<< FIX: Use modern Pydantic import
+from pydantic import BaseModel, Field
 
-# Import the new, final version of the processor
+# Import the processor (make sure filename matches)
 from rag_processor import RAGProcessor
 
 # Load environment variables from .env file
@@ -60,15 +62,12 @@ async def run_submission(request: HackRxV3Request):
         raise HTTPException(status_code=500, detail="Server not configured. Missing API keys.")
     
     try:
-        # The processor now returns a list of structured FinalResponse objects
         final_responses = await rag_processor.process_claim_queries(
             doc_url=request.documents,
             queries=request.questions
         )
         return final_responses
     except Exception as e:
-        # This will catch errors and show them in the Render logs for easy debugging
-        print(f"An unexpected error occurred in the main endpoint: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
