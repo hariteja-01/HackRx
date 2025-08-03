@@ -1,14 +1,14 @@
 # main.py
 
+import os
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
-import os
 import asyncio
 import time
 
-# Import the new, corrected processor
+# Import the processor
 from rag_processor import OptimizedRAGProcessor
 
 # --- Configuration ---
@@ -28,7 +28,8 @@ app = FastAPI(
 )
 
 # --- Security & Middleware ---
-from fastapi.security import HTTPBearer
+# <<< FIX: Import the correct credentials model
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
@@ -37,12 +38,13 @@ app.add_middleware(
 )
 security = HTTPBearer()
 
-async def verify_token(credentials: HTTPBearer.model = Depends(security)):
+# <<< FIX: Use the correct type hint for the credentials dependency
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if credentials.credentials != HACKATHON_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return credentials.credentials
 
-# --- Pydantic Models for Structured Response ---
+# --- Pydantic Models ---
 class Justification(BaseModel):
     clause: str = Field(..., description="The specific clause from the document.")
     reasoning: str = Field(..., description="How this clause supports the decision.")
@@ -67,7 +69,7 @@ async def run_queries(
     try:
         answers = await asyncio.wait_for(
             processor.process_queries(request.documents, request.questions),
-            timeout=28.0  # Set a timeout just under the 30s limit
+            timeout=28.0
         )
         duration = time.time() - start_time
         print(f"SUCCESS: Processed {len(request.questions)} queries in {duration:.2f}s")
