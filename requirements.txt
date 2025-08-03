@@ -1,10 +1,9 @@
+google-generativeai
+langchain-google-genai
+faiss-cpu 
+PyPDF2
+python-dotenv
 fastapi
 uvicorn
-python-dotenv
-openai
-faiss-cpu
-pypdf2
-python-docx
 requests
-numpy
-langchain
+python-docx
