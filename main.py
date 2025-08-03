@@ -1,75 +1,83 @@
 # main.py
 
-import os
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from typing import List, Optional
+import os
+import asyncio
+import time
 
-# Ensure this import matches the filename of your processor
-from rag_processor import RAGProcessor
-
-# Load environment variables from .env file
-load_dotenv()
+# Import the new, corrected processor
+from rag_processor import OptimizedRAGProcessor
 
 # --- Configuration ---
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
-HACKATHON_BEARER_TOKEN = os.getenv("HACKATHON_API_KEY")
+HACKATHON_API_KEY = os.getenv("HACKATHON_API_KEY", "7294b64376d390e0c8800d2f7dd32943cbe143a7eeb1f7787d878ffb3d329995")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# --- Initialize the RAG Processor ---
-try:
-    rag_processor = RAGProcessor(api_key=GEMINI_API_KEY)
-except ValueError as e:
-    print(f"FATAL ERROR: {e}. Please set GOOGLE_API_KEY in your .env file.")
-    rag_processor = None
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is not set.")
 
-# --- API Definition ---
+# Initialize processor
+processor = OptimizedRAGProcessor(openai_api_key=OPENAI_API_KEY)
+
 app = FastAPI(
-    title="HackRx 6.0 Final Decision Engine",
-    description="Optimized RAG system for claim adjudication using a 3-step reasoning pipeline.",
+    title="HackRx 6.0 Final Submission Engine",
+    description="High-performance document query system with structured decision output.",
     version="FINAL"
 )
 
-# --- Security ---
-bearer_scheme = HTTPBearer()
+# --- Security & Middleware ---
+from fastapi.security import HTTPBearer
+from fastapi.middleware.cors import CORSMiddleware
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-    if not HACKATHON_BEARER_TOKEN or credentials.credentials != HACKATHON_BEARER_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid or missing authentication token")
-    return credentials
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+)
+security = HTTPBearer()
 
-# --- Pydantic Models for a Structured Response ---
+async def verify_token(credentials: HTTPBearer.model = Depends(security)):
+    if credentials.credentials != HACKATHON_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return credentials.credentials
+
+# --- Pydantic Models for Structured Response ---
 class Justification(BaseModel):
-    clause: str = Field(..., description="The specific clause or text from the document.")
+    clause: str = Field(..., description="The specific clause from the document.")
     reasoning: str = Field(..., description="How this clause supports the decision.")
 
 class FinalResponse(BaseModel):
     decision: str = Field(..., description="The final decision, e.g., 'Approved', 'Rejected'.")
-    amount: Optional[str] = Field(None, description="The approved or payable amount, if applicable.")
-    justification: List[Justification] = Field(..., description="A list of clauses and reasons backing the decision.")
+    amount: Optional[str] = Field(None, description="The approved amount, if applicable.")
+    justification: List[Justification] = Field(..., description="List of clauses and reasons.")
 
-class FinalRequest(BaseModel):
-    documents: str = Field(..., description="URL to the PDF document to be processed.")
-    questions: list[str] = Field(..., description="A list of natural language queries for adjudication.")
+class QueryRequest(BaseModel):
+    documents: str
+    questions: List[str]
 
-# --- API Endpoint ---
-@app.post("/hackrx/run", response_model=List[FinalResponse], dependencies=[Depends(verify_token)])
-async def run_submission(request: FinalRequest):
-    if rag_processor is None:
-        raise HTTPException(status_code=500, detail="Server not configured. Missing API keys.")
-    
+# --- Endpoints ---
+@app.post("/hackrx/run", response_model=List[FinalResponse])
+async def run_queries(
+    request: QueryRequest,
+    token: str = Depends(verify_token)
+):
+    """Main endpoint to process queries and return structured decisions."""
+    start_time = time.time()
     try:
-        final_responses = await rag_processor.process_claim_queries(
-            doc_url=request.documents,
-            queries=request.questions
+        answers = await asyncio.wait_for(
+            processor.process_queries(request.documents, request.questions),
+            timeout=28.0  # Set a timeout just under the 30s limit
         )
-        return final_responses
+        duration = time.time() - start_time
+        print(f"SUCCESS: Processed {len(request.questions)} queries in {duration:.2f}s")
+        return answers
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Processing timeout after 28 seconds.")
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"An internal error occurred: {str(e)}")
+        print(f"ERROR: An exception occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/")
-async def read_root():
-    return {"status": "ok", "message": "HackRx Final Decision Engine API is running!"}
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}

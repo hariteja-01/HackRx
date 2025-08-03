@@ -1,9 +1,10 @@
 fastapi
 uvicorn
 python-dotenv
-langchain
-langchain-google-genai
-langchain-community
+openai
 faiss-cpu
 pypdf2
+python-docx
 requests
+numpy
+langchain
