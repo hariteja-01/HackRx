@@ -1,11 +1,28 @@
-google-generativeai
-langchain
-langchain-community
-langchain-google-genai
-faiss-cpu
-PyPDF2
-python-dotenv
+# Core Requirements
 fastapi
 uvicorn
-requests
+python-dotenv
+pydantic
+
+# Google Gemini AI
+google-generativeai
+langchain-google-genai
+
+# Document Processing
+PyPDF2
 python-docx
+
+# Vector Database & Embeddings
+faiss-cpu
+numpy
+
+# HTTP Requests
+requests
+httpx
+
+# Async Utilities
+aiohttp
+
+# Additional Utilities
+python-multipart
+typing-extensions
