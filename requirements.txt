@@ -7,6 +7,8 @@ pydantic
 # Google Gemini AI
 google-generativeai
 langchain-google-genai
+langchain-core
+langchain
 
 # Document Processing
 PyPDF2
@@ -19,9 +21,6 @@ numpy
 # HTTP Requests
 requests
 httpx
-
-# Async Utilities
-aiohttp
 
 # Additional Utilities
 python-multipart
