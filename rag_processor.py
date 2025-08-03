@@ -30,7 +30,7 @@ class FinalResponse(BaseModel):
     justification: List[Justification] = Field(..., description="A list of justification objects, each linking a document clause to the reasoning for the decision.")
 
 class CustomEmbeddings(Embeddings):
-    """Wrapper for OpenAI embeddings."""
+    """Wrapper for OpenAI embeddings that includes required sync and async methods."""
     def __init__(self, client: AsyncOpenAI):
         self.client = client
         
@@ -40,6 +40,16 @@ class CustomEmbeddings(Embeddings):
 
     async def aembed_query(self, text: str) -> List[float]:
         return (await self.aembed_documents([text]))[0]
+        
+    # --- FIX: Added required synchronous methods ---
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Synchronous wrapper for the async method."""
+        return asyncio.run(self.aembed_documents(texts))
+
+    def embed_query(self, text: str) -> List[float]:
+        """Synchronous wrapper for the async method."""
+        return asyncio.run(self.aembed_query(text))
+    # --- End of Fix ---
 
 class OptimizedRAGProcessor:
     def __init__(self, openai_api_key: str):
