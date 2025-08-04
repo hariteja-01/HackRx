@@ -1,27 +1,11 @@
-# Core Requirements
-fastapi
-uvicorn
-python-dotenv
-pydantic
-
-# Google Gemini AI
-google-generativeai
-langchain-google-genai
-langchain-core
-langchain
-
-# Document Processing
-PyPDF2
-python-docx
-
-# Vector Database & Embeddings
-faiss-cpu
-numpy
-
-# HTTP Requests
-requests
-httpx
-
-# Additional Utilities
-python-multipart
-typing-extensions
+fastapi==0.109.1
+uvicorn==0.27.0
+python-dotenv==1.0.0
+PyPDF2==3.0.1
+python-docx==0.8.11
+requests==2.31.0
+google-generativeai==0.3.2
+sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+numpy==1.26.3
+python-multipart==0.0.6
