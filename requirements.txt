@@ -8,5 +8,7 @@ google-generativeai==0.3.2
 sentence-transformers==2.2.2
 numpy==1.26.3
 python-multipart==0.0.6
-# Replace faiss-cpu with this:
-faiss-cpu-noavx2==1.7.4  # Windows-compatible version
+chromadb==0.4.22
+tqdm==4.66.2
+typing-extensions==4.9.0
+pydantic==2.6.1
