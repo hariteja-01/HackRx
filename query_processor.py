@@ -4,9 +4,21 @@ from typing import Dict, Any, List
 import logging
 import re
 import json
-from sentence_transformers import SentenceTransformer
 import numpy as np
-import faiss
+
+# Conditional imports for FAISS
+try:
+    import faiss
+except ImportError:
+    try:
+        from faiss_cpu_noavx2 import faiss
+    except ImportError:
+        raise ImportError("Could not import either faiss or faiss_cpu_noavx2")
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    raise ImportError("sentence-transformers package not installed")
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +77,13 @@ class QueryProcessor:
             context = "\n\n".join(relevant_chunks)
             
             # Generate prompt
-            prompt = f"""
-            You are an expert document analyst. Answer the question based on the provided context.
-            Be precise and only use information from the context. If you don't know, say "I don't know".
-
-            Context:
-            {context}
-
-            Question: {question}
-            Answer:
-            """
+            prompt = (
+                "You are an expert document analyst. Answer the question based on the provided context.\n"
+                "Be precise and only use information from the context. If you don't know, say \"I don't know\".\n\n"
+                f"Context:\n{context}\n\n"
+                f"Question: {question}\n"
+                "Answer:"
+            )
             
             # Get response from Gemini
             response = self.model.generate_content(prompt)
@@ -97,35 +106,31 @@ class QueryProcessor:
                 context = "\n\n".join(relevant_chunks)
             
             # Generate structured prompt
-            prompt = f"""
-            You are an insurance policy analyzer. Analyze the query and return a JSON response with:
-            - decision: "approved" or "rejected" or "needs_more_info"
-            - amount: if applicable, the payout amount
-            - justification: brief explanation of the decision
-            - clauses: list of policy clauses that support the decision
-
-            Query: {query}
-            {f"Policy Context:\n{context}" if context else "No policy context provided"}
-            
-            Return ONLY valid JSON in this format:
-            {{
-                "decision": "approved|rejected|needs_more_info",
-                "amount": null|number,
-                "justification": "string",
-                "clauses": ["string"]
-            }}
-            """
+            prompt = (
+                "You are an insurance policy analyzer. Analyze the query and return a JSON response with:\n"
+                "- decision: \"approved\" or \"rejected\" or \"needs_more_info\"\n"
+                "- amount: if applicable, the payout amount\n"
+                "- justification: brief explanation of the decision\n"
+                "- clauses: list of policy clauses that support the decision\n\n"
+                f"Query: {query}\n"
+                f"{'Policy Context:' + context if context else 'No policy context provided'}\n\n"
+                "Return ONLY valid JSON in this format:\n"
+                "{\n"
+                '    "decision": "approved|rejected|needs_more_info",\n'
+                '    "amount": null|number,\n'
+                '    "justification": "string",\n'
+                '    "clauses": ["string"]\n'
+                "}"
+            )
             
             # Get response from Gemini
             response = self.model.generate_content(prompt)
             
             # Parse JSON response
             try:
-                # Sometimes Gemini adds markdown syntax
                 json_str = response.text.replace('```json', '').replace('```', '').strip()
                 decision_data = json.loads(json_str)
                 
-                # Validate structure
                 if not all(key in decision_data for key in ['decision', 'justification', 'clauses']):
                     raise ValueError("Invalid response structure")
                 

@@ -6,6 +6,7 @@ python-docx==0.8.11
 requests==2.31.0
 google-generativeai==0.3.2
 sentence-transformers==2.2.2
-faiss-cpu==1.7.4
 numpy==1.26.3
 python-multipart==0.0.6
+# Replace faiss-cpu with this:
+faiss-cpu-noavx2==1.7.4  # Windows-compatible version
